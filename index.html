@@ -473,7 +473,7 @@
        pitch, envelope SHAPE and duration are untouched and their relative balance is
        preserved. The same figure is baked into sfx-water/choc/cup/bomb.wav, so the Web
        Audio and media backends are the same loudness. Level tick/GO are NOT affected. */
-    var CATCH_GAIN = 1.6;                 /* +4.082 dB */
+    var CATCH_GAIN = 2.0;                 /* +6.021 dB */
     var backend = null;                   /* null | "webaudio" | "media" */
     /* Six persistent elements, one per unique sound. Each file holds ONLY its own
        sound, so playback is currentTime = 0 then play() - no sprite, no non-zero seek,
