@@ -178,6 +178,20 @@
   #flash.hit { animation: flashHit .5s ease-out; }
   @keyframes flashHit { 0% { opacity: 0; } 22% { opacity: 1; } 100% { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .arrow { animation: none; } }
+  /* TEMPORARY diagnostics - these elements only ever exist when ?sfxdebug=1 is in the URL */
+  #sfxdbg { position: fixed; left: 0; top: 0; z-index: 99999; max-width: 100%;
+            font: 9px/1.25 ui-monospace, Menlo, Consolas, monospace; white-space: pre;
+            color: #0f0; background: rgba(0,0,0,.82); padding: 3px 4px;
+            pointer-events: none; overflow: hidden; }
+  #sfxcopy { position: fixed; right: 4px; bottom: 4px; z-index: 100000;
+             font: 12px/1 system-ui, -apple-system, sans-serif; padding: 8px 11px;
+             border: 1px solid #060; border-radius: 5px; background: #0f0; color: #000; }
+  #sfxout { position: fixed; left: 2%; top: 12%; width: 96%; height: 62%; z-index: 100000;
+            display: none; font: 10px/1.3 ui-monospace, Menlo, Consolas, monospace;
+            -webkit-user-select: text; user-select: text; padding: 6px; }
+  #sfxhint { position: fixed; left: 2%; top: 6%; width: 96%; z-index: 100000; display: none;
+             font: 12px/1.35 system-ui, -apple-system, sans-serif; color: #fff;
+             background: rgba(0,0,0,.85); padding: 6px; border-radius: 5px; }
 </style>
 </head>
 <body>
@@ -312,6 +326,71 @@
 
   if (/[?&]debug=1/.test(location.search)) document.body.classList.add("debug");
 
+  /* ===================== TEMPORARY SFX INSTRUMENTATION =====================
+     Active ONLY with ?sfxdebug=1 in the URL. Without the flag DBG.on is false, every
+     call site is a single boolean test, no element is created, no timer is scheduled
+     and no record is kept - the game behaves exactly as it does without this block. */
+  var SFXDBG = /[?&]sfxdebug=1/.test(location.search);
+  var catchNo = 0;
+  var DBG = (function () {
+    if (!SFXDBG) return { on: false, add: function () { return -1; }, patch: function () {} };
+
+    var panel = document.createElement("div"); panel.id = "sfxdbg";
+    var btn   = document.createElement("button"); btn.id = "sfxcopy"; btn.textContent = "COPY SFX LOG";
+    var hint  = document.createElement("div"); hint.id = "sfxhint";
+    var out   = document.createElement("textarea"); out.id = "sfxout";
+    /* appended to <body>, NOT to #frame, so they can never reach the frame's
+       pointerdown handler and cannot affect dragging or starting a round */
+    document.body.appendChild(panel);
+    document.body.appendChild(hint);
+    document.body.appendChild(out);
+    document.body.appendChild(btn);
+
+    var recs = [];
+    function render() { panel.textContent = recs.slice(-12).join("\n"); }
+
+    function reveal(txt, msg) {
+      out.value = txt;
+      out.style.display = "block";
+      hint.style.display = "block";
+      hint.textContent = msg + "  -  tap and hold inside the box, choose Select All, then Copy. Tap COPY SFX LOG again to hide.";
+      try {
+        out.focus();
+        out.setSelectionRange(0, txt.length);   /* iOS Safari: works after focus() */
+      } catch (e) {}
+    }
+    function hide() {
+      out.style.display = "none";
+      hint.style.display = "none";
+      btn.textContent = "COPY SFX LOG";
+    }
+
+    btn.addEventListener("click", function () {
+      if (out.style.display === "block") { hide(); return; }
+      var txt = recs.length ? recs.join("\n") : "(no SFX records yet)";
+      /* try the clipboard first, but ALWAYS show the text as well so there is a
+         manual path on the phone even when the clipboard is blocked */
+      var shown = false;
+      function fallback(why) { if (!shown) { shown = true; reveal(txt, why); } }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(
+          function () { btn.textContent = "COPIED"; fallback("Copied to the clipboard."); },
+          function (e) { btn.textContent = "COPY BLOCKED"; fallback("Clipboard blocked (" + e.name + ")."); });
+      } else {
+        var ok = false;
+        reveal(txt, "Selecting the log."); shown = true;
+        try { ok = document.execCommand && document.execCommand("copy"); } catch (e) {}
+        btn.textContent = ok ? "COPIED" : "COPY BLOCKED";
+      }
+    });
+
+    return {
+      on: true,
+      add: function (str) { recs.push(str); render(); return recs.length - 1; },
+      patch: function (i, str) { if (recs[i] !== undefined) { recs[i] += str; render(); } }
+    };
+  })();
+
   bgEl.style.backgroundImage = "url('" + A.bg + "')";
   $("cupImg").src = A.cup;
   $("lgWater").src = A.o_water; $("lgChoc").src = A.o_choc;
@@ -403,10 +482,34 @@
   /* ======================= SFX ============================================== */
   var sfx = (function () {
     var ac = null, primed = false;
+    var ctxSeq = 0;                       /* TEMP: counts how many contexts were created */
     function ctx() {
-      if (!ac) { var C = window.AudioContext || window.webkitAudioContext; if (C) ac = new C(); }
+      if (!ac) {
+        var C = window.AudioContext || window.webkitAudioContext;
+        if (C) {
+          ac = new C(); ctxSeq++;
+          if (DBG.on) DBG.add("AudioContext CREATED #" + ctxSeq + " state=" + ac.state + " sr=" + ac.sampleRate);
+        }
+      }
       if (ac && ac.state === "suspended") ac.resume();
       return ac;
+    }
+    /* TEMP diagnostics helpers - only ever called from inside an if (DBG.on) branch */
+    function sessNow() {
+      if (!("audioSession" in navigator)) return "n/a";
+      try { return String(navigator.audioSession.type); } catch (e) { return "?"; }
+    }
+    function bgmNow() {
+      var eA = $("bgmA"), eB = $("bgmB"), el = eA.paused ? (eB.paused ? null : eB) : eA;
+      if (!el) return "bgm both paused";
+      return el.id + " paused=" + el.paused + " vol=" + el.volume + " t=" + el.currentTime.toFixed(1);
+    }
+    function dbgClock(a, rec) {
+      var t0 = a.currentTime;
+      setTimeout(function () {
+        var d = a.currentTime - t0;
+        DBG.patch(rec, " | +400ms dt=" + d.toFixed(3) + (d > 0.05 ? " ADVANCING" : " *FROZEN*") + " " + a.state);
+      }, 400);
     }
     /* iOS starts a page in the "auto" audio session category, which follows the
        hardware Silent switch - measured on a real iPhone (iOS 18.7) to mute these Web
@@ -439,28 +542,53 @@
        right after a resume() on mobile. Inaudible; tone/length/volume unchanged. */
     function at(a) { return a.currentTime + 0.02; }
     function blip(f, d, type, vol) {
-      var a = ctx(); if (!a) return;
-      var t = at(a);
-      var o = a.createOscillator(), g = a.createGain();
-      o.type = type || "sine"; o.frequency.setValueAtTime(f, t);
-      o.frequency.exponentialRampToValueAtTime(f * 1.7, t + d);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(vol || 0.16, t + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-      o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + d + 0.02);
+      var a = ctx();
+      if (!a) { if (DBG.on) DBG.add("  blip: ctx() returned NULL - no AudioContext"); return; }
+      var rec = -1;
+      if (DBG.on) rec = DBG.add(
+        "  blip " + (type || "sine") + " " + f + "->" + (f * 1.7).toFixed(0) + "Hz g=" + (vol || 0.16)
+        + " d=" + d + " | ctx#" + ctxSeq + " " + a.state + " t=" + a.currentTime.toFixed(3)
+        + " sess=" + sessNow() + " | " + bgmNow());
+      try {
+        var t = at(a);
+        var o = a.createOscillator(), g = a.createGain();
+        if (DBG.on) DBG.patch(rec, " osc=OK");
+        o.type = type || "sine"; o.frequency.setValueAtTime(f, t);
+        o.frequency.exponentialRampToValueAtTime(f * 1.7, t + d);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(vol || 0.16, t + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+        o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + d + 0.02);
+        if (DBG.on) { DBG.patch(rec, " start=OK stop=OK"); dbgClock(a, rec); }
+      } catch (e) {
+        if (!DBG.on) throw e;              /* without the flag, behaviour is unchanged */
+        DBG.patch(rec, " EXCEPTION " + e.name + ": " + e.message);
+      }
     }
     return {
       unlock: function () { prime(); },
       pick: function (p) { blip(p >= 10 ? 790 : p >= 5 ? 630 : 505, 0.16, "triangle", 0.17); },
       boom: function () {
-        var a = ctx(); if (!a) return;
-        var t = at(a);
-        var o = a.createOscillator(), g = a.createGain();
-        o.type = "sawtooth"; o.frequency.setValueAtTime(180, t);
-        o.frequency.exponentialRampToValueAtTime(38, t + 0.45);
-        g.gain.setValueAtTime(0.22, t);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
-        o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.52);
+        var a = ctx();
+        if (!a) { if (DBG.on) DBG.add("  boom: ctx() returned NULL - no AudioContext"); return; }
+        var rec = -1;
+        if (DBG.on) rec = DBG.add(
+          "  boom sawtooth 180->38Hz g=0.22 d=0.5 | ctx#" + ctxSeq + " " + a.state
+          + " t=" + a.currentTime.toFixed(3) + " sess=" + sessNow() + " | " + bgmNow());
+        try {
+          var t = at(a);
+          var o = a.createOscillator(), g = a.createGain();
+          if (DBG.on) DBG.patch(rec, " osc=OK");
+          o.type = "sawtooth"; o.frequency.setValueAtTime(180, t);
+          o.frequency.exponentialRampToValueAtTime(38, t + 0.45);
+          g.gain.setValueAtTime(0.22, t);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+          o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.52);
+          if (DBG.on) { DBG.patch(rec, " start=OK stop=OK"); dbgClock(a, rec); }
+        } catch (e) {
+          if (!DBG.on) throw e;            /* without the flag, behaviour is unchanged */
+          DBG.patch(rec, " EXCEPTION " + e.name + ": " + e.message);
+        }
       },
       count: function (go) { blip(go ? 900 : 560, go ? 0.3 : 0.13, "square", 0.13); }
     };
@@ -607,8 +735,10 @@
 
   function onCatch(it) {
     it.caught = true;
+    if (DBG.on) { catchNo++; DBG.add("CATCH #" + catchNo + " " + it.kind + " pts=" + it.pts + " onCatch=REACHED"); }
     if (it.kind === "bomb") {
       lives = Math.max(0, lives - 1);
+      if (DBG.on) DBG.add("  -> sfx.boom()");
       sfx.boom();
       flash.classList.remove("hit"); void flash.offsetWidth; flash.classList.add("hit");
       popup(it.cx, cup.rimY - cup.h * 0.16, "-1 LIFE", "#ff8d76");
@@ -626,6 +756,7 @@
       levelToast.classList.remove("show"); void levelToast.offsetWidth; levelToast.classList.add("show");
       sfx.count(true);
     }
+    if (DBG.on) DBG.add("  -> sfx.pick(" + it.pts + ")");
     sfx.pick(it.pts);
     var art = cupEl.firstElementChild;
     if (art && art.animate) {
