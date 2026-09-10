@@ -55,6 +55,8 @@
                    letter-spacing: .16em; color: #fff; text-align: center; }
   #scoreVal { font: 900 calc(var(--u)*6.4)/1.15 "Trebuchet MS",sans-serif; text-align: center;
               color: #fff; font-variant-numeric: tabular-nums; }
+  #levelLine { margin-top: calc(var(--u)*0.7); text-align:center; font: 800 calc(var(--u)*2.2)/1 "Trebuchet MS",sans-serif;
+               letter-spacing:.13em; color:#ffe29b; text-shadow:0 0 calc(var(--u)*1.6) rgba(255,191,76,.55); }
   #legend { border-top: 1px solid rgba(232,190,120,.32);
             margin-top: calc(var(--u)*1.6); padding-top: calc(var(--u)*1.7); }
   #legend .row { display: flex; align-items: center; gap: calc(var(--u)*1.8);
@@ -97,6 +99,17 @@
     background: linear-gradient(180deg, rgba(255,206,124,0), rgba(255,206,124,.62));
   }
   .item.bomb .trail { background: linear-gradient(180deg, rgba(255,120,80,0), rgba(255,120,80,.5)); }
+  .item.goldcup { filter: drop-shadow(0 0 calc(var(--u)*2.8) rgba(255,211,74,.95)) drop-shadow(0 0 calc(var(--u)*5.5) rgba(255,170,24,.55)); }
+  .item.goldcup img { filter: sepia(1) saturate(2.4) hue-rotate(355deg) brightness(1.22) contrast(1.08); }
+  .item.goldcup .trail { width: calc(var(--u)*0.8); background: linear-gradient(180deg, rgba(255,232,120,0), rgba(255,213,72,.95)); }
+  .item.goldcup::after { content:"★"; position:absolute; right:-8%; top:-7%; font-size:calc(var(--u)*3.8); color:#fff2a3;
+                         text-shadow:0 0 calc(var(--u)*2.5) #ffc72c; animation:goldTwinkle .7s ease-in-out infinite alternate; }
+  @keyframes goldTwinkle { from { transform:scale(.8) rotate(-12deg); opacity:.65; } to { transform:scale(1.18) rotate(10deg); opacity:1; } }
+  #levelToast { position:absolute; z-index:18; left:50%; top:33%; transform:translate(-50%,-50%) scale(.7); opacity:0; pointer-events:none;
+                font:900 calc(var(--u)*5.5)/1 "Trebuchet MS",sans-serif; letter-spacing:.12em; color:#fff1ad; text-align:center;
+                text-shadow:0 0 calc(var(--u)*2) #ffbf25,0 0 calc(var(--u)*5) rgba(255,166,0,.95); }
+  #levelToast.show { animation:levelBurst 1.1s ease-out forwards; }
+  @keyframes levelBurst { 0%{opacity:0;transform:translate(-50%,-50%) scale(.55)} 20%{opacity:1;transform:translate(-50%,-50%) scale(1.12)} 70%{opacity:1} 100%{opacity:0;transform:translate(-50%,-62%) scale(1)} }
 
   /* ---- PLAYER ---- */
   #cup { position: absolute; left: 0; top: 0; z-index: 8; will-change: transform; pointer-events: none; }
@@ -203,10 +216,12 @@
     <div id="scoreBox" class="panel">
       <div class="cap">SCORE</div>
       <div id="scoreVal">0</div>
+      <div id="levelLine">LEVEL <span id="levelVal">1</span></div>
       <div id="legend">
         <div class="row"><img id="lgWater" alt=""><span class="nm">Water</span><span class="pt">+2 pts</span></div>
         <div class="row"><img id="lgChoc" alt=""><span class="nm">Chocolate</span><span class="pt">+5 pts</span></div>
         <div class="row"><img id="lgCup" alt=""><span class="nm">Cup</span><span class="pt">+10 pts</span></div>
+        <div class="row"><img id="lgGold" alt="" style="filter:sepia(1) saturate(2.4) brightness(1.2)"><span class="nm">Gold Cup</span><span class="pt">+25 pts</span></div>
         <div class="row bad"><img id="lgBomb" alt=""><span class="nm">Bomb</span><span class="pt">-1 life</span></div>
       </div>
     </div>
@@ -229,6 +244,7 @@
 
   <div id="hint" class="panel">DRAG THE CUP TO CATCH ITEMS</div>
   <div id="flash"></div>
+  <div id="levelToast">LEVEL UP!</div>
   <div id="replayBar"><button class="btn" id="btnReplayBar">PLAY AGAIN</button></div>
   <div id="overlay"><div class="card" id="card"></div></div>
 </div>
@@ -272,6 +288,7 @@
     SPAWN_EASY: 0.86, SPAWN_HARD: 0.42,
     FALL_EASY:  0.30, FALL_HARD:  0.60,
     BOMB_EASY:  9,    BOMB_HARD:  26,
+    LEVEL_STEP: 50, GOLD_WEIGHT: 5, LEVEL_SPEEDUP: 0.065,
     MUSIC_VOLUME: 0.22, LOOP_LEAD: 1.8, FADE_PAUSE: 260, FADE_OVER: 700
   };
 
@@ -281,13 +298,14 @@
     water: { src:A.o_water, ratio:0.09610, ar:1.30698, pts:2,  weight:44, speed:1.06, color:"#9fdcff" },
     choc:  { src:A.o_choc,  ratio:0.13960, ar:1.03953, pts:5,  weight:30, speed:1.00, color:"#e6ac6e" },
     cup:   { src:A.o_cup,   ratio:0.14350, ar:1.33023, pts:10, weight:17, speed:0.88, color:"#ffd98a" },
+    goldcup:{ src:A.o_cup, ratio:0.14800, ar:1.33023, pts:25, weight:5, speed:0.82, color:"#ffe86b" },
     bomb:  { src:A.o_bomb,  ratio:0.15480, ar:1.08837, pts:0,  weight:0,  speed:1.02, color:"#ff8d76" }
   };
 
   var $ = function (id) { return document.getElementById(id); };
   var frame=$("frame"), bgEl=$("bg"), layer=$("layer"), cupEl=$("cup"), cupGlow=$("cupGlow"),
       zoneDbg=$("zoneDbg"), arrowL=$("arrowL"), arrowR=$("arrowR"), scoreVal=$("scoreVal"),
-      hearts=$("hearts"), timeVal=$("timeVal"), pauseBtn=$("pauseBtn"), overlay=$("overlay"),
+      hearts=$("hearts"), timeVal=$("timeVal"), levelVal=$("levelVal"), levelToast=$("levelToast"), pauseBtn=$("pauseBtn"), overlay=$("overlay"),
       card=$("card"), hint=$("hint"), brandWrap=$("brandWrap"), flash=$("flash"),
       replayBar=$("replayBar"), btnReplayBar=$("btnReplayBar"),
       scoreBox=$("scoreBox"), topRight=$("topRight"), livesBox=$("livesBox"), timeBox=$("timeBox");
@@ -297,7 +315,7 @@
   bgEl.style.backgroundImage = "url('" + A.bg + "')";
   $("cupImg").src = A.cup;
   $("lgWater").src = A.o_water; $("lgChoc").src = A.o_choc;
-  $("lgCup").src = A.o_cup;     $("lgBomb").src = A.o_bomb;
+  $("lgCup").src = A.o_cup; $("lgGold").src = A.o_cup; $("lgBomb").src = A.o_bomb;
 
   // decode sprites once up front so the first spawn never hitches
   Object.keys(ITEMS).forEach(function (k) { var i = new Image(); i.src = ITEMS[k].src; });
@@ -307,7 +325,7 @@
     var els = [$("bgmA"), $("bgmB")];
     var active = 0, gain = [1, 0], master = 0, ramp = null;
     var crossfading = false, xfT0 = 0, started = false, wantPlaying = false;
-    els.forEach(function (el) { el.loop = false; el.volume = 0; el.preload = "auto"; el.src = A.bgm; });
+    els.forEach(function (el) { el.loop = true; el.volume = 0; el.preload = "auto"; el.src = A.bgm; });
     function apply() {
       for (var i = 0; i < 2; i++) {
         var v = CFG.MUSIC_VOLUME * master * gain[i];
@@ -360,7 +378,7 @@
         }
         if (wantPlaying && started) {
           var cur = els[active], dur = cur.duration, other = els[1 - active];
-          if (!crossfading && isFinite(dur) && dur > CFG.LOOP_LEAD * 2 &&
+          if (!cur.loop && !crossfading && isFinite(dur) && dur > CFG.LOOP_LEAD * 2 &&
               cur.currentTime >= dur - CFG.LOOP_LEAD) {
             crossfading = true; xfT0 = now;
             try { other.currentTime = 0; } catch (e) {}
@@ -384,33 +402,55 @@
 
   /* ======================= SFX ============================================== */
   var sfx = (function () {
-    var ac = null;
+    var ac = null, primed = false;
     function ctx() {
       if (!ac) { var C = window.AudioContext || window.webkitAudioContext; if (C) ac = new C(); }
       if (ac && ac.state === "suspended") ac.resume();
       return ac;
     }
+    /* Mobile unlock. iOS/Safari leaves a new AudioContext suspended, and while it is
+       suspended currentTime is frozen - so every envelope scheduled against it lands
+       in the past and is silent once the context finally resumes. resume() alone is
+       async and does not guarantee "running"; starting one silent 1-sample buffer in
+       the SAME user gesture is what actually opens output. Runs once per context. */
+    function prime() {
+      var a = ctx(); if (!a) return;
+      if (!primed) {
+        try {
+          var b = a.createBuffer(1, 1, 22050), s = a.createBufferSource();
+          s.buffer = b; s.connect(a.destination); s.start(0);
+          primed = true;
+        } catch (e) {}
+      }
+      if (a.state === "suspended" && a.resume) a.resume();
+    }
+    /* Schedule a hair ahead so an envelope is never written into an audio quantum the
+       render thread has already produced - which is what silences the first sounds
+       right after a resume() on mobile. Inaudible; tone/length/volume unchanged. */
+    function at(a) { return a.currentTime + 0.02; }
     function blip(f, d, type, vol) {
       var a = ctx(); if (!a) return;
+      var t = at(a);
       var o = a.createOscillator(), g = a.createGain();
-      o.type = type || "sine"; o.frequency.setValueAtTime(f, a.currentTime);
-      o.frequency.exponentialRampToValueAtTime(f * 1.7, a.currentTime + d);
-      g.gain.setValueAtTime(0.0001, a.currentTime);
-      g.gain.exponentialRampToValueAtTime(vol || 0.16, a.currentTime + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + d);
-      o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + d + 0.02);
+      o.type = type || "sine"; o.frequency.setValueAtTime(f, t);
+      o.frequency.exponentialRampToValueAtTime(f * 1.7, t + d);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol || 0.16, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + d + 0.02);
     }
     return {
-      unlock: function () { ctx(); },
+      unlock: function () { prime(); },
       pick: function (p) { blip(p >= 10 ? 790 : p >= 5 ? 630 : 505, 0.16, "triangle", 0.17); },
       boom: function () {
         var a = ctx(); if (!a) return;
+        var t = at(a);
         var o = a.createOscillator(), g = a.createGain();
-        o.type = "sawtooth"; o.frequency.setValueAtTime(180, a.currentTime);
-        o.frequency.exponentialRampToValueAtTime(38, a.currentTime + 0.45);
-        g.gain.setValueAtTime(0.22, a.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + 0.5);
-        o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + 0.52);
+        o.type = "sawtooth"; o.frequency.setValueAtTime(180, t);
+        o.frequency.exponentialRampToValueAtTime(38, t + 0.45);
+        g.gain.setValueAtTime(0.22, t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+        o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.52);
       },
       count: function (go) { blip(go ? 900 : 560, go ? 0.3 : 0.13, "square", 0.13); }
     };
@@ -481,10 +521,10 @@
   /* ======================= STATE =========================================== */
   var READY="ready", PLAYING="playing", COUNTDOWN="countdown", PAUSED="paused", OVER="over";
   var state = READY;
-  var score = 0, lives = CFG.START_LIVES, elapsed = 0;
+  var score = 0, lives = CFG.START_LIVES, elapsed = 0, level = 1;
   var items = [], spawnTimer = 0, lastT = 0, countQueue = [], countTimer = 0;
 
-  function diff() { return Math.min(1, elapsed / CFG.RAMP_SECONDS); }
+  function diff() { return Math.min(1, elapsed / CFG.RAMP_SECONDS + (level - 1) * CFG.LEVEL_SPEEDUP); }
   function lerp(a, b, t) { return a + (b - a) * t; }
   function fmtTime(s) {
     s = Math.max(0, Math.floor(s));
@@ -493,6 +533,7 @@
   }
   function renderHud() {
     scoreVal.textContent = score;
+    levelVal.textContent = level;
     timeVal.textContent = fmtTime(elapsed);
     var hs = hearts.children;
     for (var i = 0; i < hs.length; i++) hs[i].classList.toggle("gone", i >= lives);
@@ -501,9 +542,10 @@
   /* ======================= OBJECTS ========================================= */
   function pickKind() {
     var bombW = lerp(CFG.BOMB_EASY, CFG.BOMB_HARD, diff());
-    var keys = ["water", "choc", "cup", "bomb"];
-    var ws = [ITEMS.water.weight, ITEMS.choc.weight, ITEMS.cup.weight, bombW];
-    var r = Math.random() * (ws[0] + ws[1] + ws[2] + ws[3]);
+    var keys = ["water", "choc", "cup", "goldcup", "bomb"];
+    var goldW = CFG.GOLD_WEIGHT + Math.min(4, level - 1) * 0.35;
+    var ws = [ITEMS.water.weight, ITEMS.choc.weight, ITEMS.cup.weight, goldW, bombW];
+    var r = Math.random() * (ws[0] + ws[1] + ws[2] + ws[3] + ws[4]);
     for (var i = 0; i < keys.length; i++) { r -= ws[i]; if (r <= 0) return keys[i]; }
     return "water";
   }
@@ -564,8 +606,16 @@
       if (lives <= 0) gameOver();
       return;
     }
+    var oldLevel = level;
     score += it.pts;
+    level = Math.floor(score / CFG.LEVEL_STEP) + 1;
     popup(it.cx, cup.rimY - cup.h * 0.16, "+" + it.pts, it.color);
+    if (it.kind === "goldcup") popup(it.cx, cup.rimY - cup.h * 0.28, "GOLD CUP!", "#fff1a0");
+    if (level > oldLevel) {
+      levelToast.textContent = "LEVEL " + level + "!";
+      levelToast.classList.remove("show"); void levelToast.offsetWidth; levelToast.classList.add("show");
+      sfx.count(true);
+    }
     sfx.pick(it.pts);
     var art = cupEl.firstElementChild;
     if (art && art.animate) {
@@ -646,6 +696,7 @@
     countQueue = ["3", "2", "1", "GO"]; countTimer = 0;
     card.className = "card"; card.innerHTML = "";
     overlay.classList.add("show", "clear");
+    sfx.unlock();
     Music.resume(2000);
   }
 
@@ -657,6 +708,7 @@
     card.className = "card panel";
     card.innerHTML = "<h2>GAME OVER</h2>" +
       '<div class="stat"><div class="k">SCORE</div><div class="v">' + score + "</div></div>" +
+      '<div class="stat"><div class="k">LEVEL REACHED</div><div class="v sm">' + level + "</div></div>" +
       '<div class="stat"><div class="k">TIME SURVIVED</div><div class="v sm">' + fmtTime(elapsed) + "</div></div>" +
       '<button class="btn" id="btnAgain">PLAY AGAIN</button>' +
       '<button class="btn ghost" id="btnNot">NOT NOW</button>';
@@ -668,7 +720,7 @@
 
   function resetRound() {
     for (var i = items.length - 1; i >= 0; i--) removeItem(i);
-    score = 0; lives = CFG.START_LIVES; elapsed = 0;
+    score = 0; lives = CFG.START_LIVES; elapsed = 0; level = 1;
     spawnTimer = 0; countQueue = []; countTimer = 0;
     cup.cx = W / 2; placeCup();
     Music.reset();
@@ -741,6 +793,7 @@
     state: function () { return state; },
     score: function () { return score; },
     lives: function () { return lives; },
+    level: function () { return level; },
     elapsed: function () { return elapsed; },
     items: function () { return items; },
     audio: function () {
