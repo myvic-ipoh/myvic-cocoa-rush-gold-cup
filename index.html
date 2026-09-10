@@ -468,6 +468,12 @@
     /* Backend is chosen ONCE per page session and never re-decided: the real iPhone
        showed a context that stayed suspended for ~38 s and then woke up, and flipping
        backends mid-session would change how the game sounds partway through. */
+    /* ONE loudness multiplier for the five falling-object catch SFX (Water, Chocolate,
+       Cup, Gold Cup, Bomb). It scales every point of their gain envelope uniformly, so
+       pitch, envelope SHAPE and duration are untouched and their relative balance is
+       preserved. The same figure is baked into sfx-water/choc/cup/bomb.wav, so the Web
+       Audio and media backends are the same loudness. Level tick/GO are NOT affected. */
+    var CATCH_GAIN = 1.4;                 /* +2.923 dB */
     var backend = null;                   /* null | "webaudio" | "media" */
     /* TEMP diagnostic split: ?forcemedia=1 skips the state test and commits to the
        media fallback, so the two-channel path can be heard on a device where
@@ -677,7 +683,7 @@
           + dt.toFixed(3) + "s" + (dt > 0 ? " ADVANCING" : " *** FROZEN ***") + " state=" + a.state);
       }, 400);
     }
-    function blip(f, d, type, vol) {
+    function blip(f, d, type, vol, mul) {
       if (!backend) decide();
       if (backend === "media") {
         playSound(soundFor(f, type || "sine")); return;
@@ -688,14 +694,15 @@
       var o = a.createOscillator(), g = a.createGain();
       o.type = type || "sine"; o.frequency.setValueAtTime(f, t);
       o.frequency.exponentialRampToValueAtTime(f * 1.7, t + d);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(vol || 0.16, t + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      mul = mul || 1;                     /* 1 for the level sounds, CATCH_GAIN for catches */
+      g.gain.setValueAtTime(0.0001 * mul, t);
+      g.gain.exponentialRampToValueAtTime((vol || 0.16) * mul, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001 * mul, t + d);
       o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + d + 0.02);
     }
     return {
       unlock: function () { prime(); },
-      pick: function (p) { blip(p >= 10 ? 790 : p >= 5 ? 630 : 505, 0.16, "triangle", 0.17); },
+      pick: function (p) { blip(p >= 10 ? 790 : p >= 5 ? 630 : 505, 0.16, "triangle", 0.17, CATCH_GAIN); },
       boom: function () {
         if (!backend) decide();
         if (backend === "media") {
@@ -707,8 +714,8 @@
         var o = a.createOscillator(), g = a.createGain();
         o.type = "sawtooth"; o.frequency.setValueAtTime(180, t);
         o.frequency.exponentialRampToValueAtTime(38, t + 0.45);
-        g.gain.setValueAtTime(0.22, t);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+        g.gain.setValueAtTime(0.22 * CATCH_GAIN, t);
+        g.gain.exponentialRampToValueAtTime(0.0001 * CATCH_GAIN, t + 0.5);
         o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.52);
       },
       count: function (go) { blip(go ? 900 : 560, go ? 0.3 : 0.13, "square", 0.13); }
