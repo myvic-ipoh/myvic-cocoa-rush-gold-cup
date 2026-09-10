@@ -472,6 +472,10 @@
        showed a context that stayed suspended for ~38 s and then woke up, and flipping
        backends mid-session would change how the game sounds partway through. */
     var backend = null;                   /* null | "webaudio" | "media" */
+    /* TEMP diagnostic split: ?forcemedia=1 skips the state test and commits to the
+       media fallback, so the two-channel path can be heard on a device where
+       state === "running" has proved not to mean audible. */
+    var FORCE_MEDIA = /[?&]forcemedia=1/.test(location.search);
     var DECIDE_MS = 400;                  /* bounded: always before the first catch */
     var chans = null, ch = 0, chanState = ["not primed", "not primed"];
     /* start seconds, length seconds - matches the rendered sprite exactly */
@@ -633,7 +637,7 @@
     function decide() {
       if (backend) return;
       var ok = !!(ac && ac.state === "running");
-      backend = ok ? "webaudio" : (chans ? "media" : "webaudio");
+      backend = FORCE_MEDIA ? "media" : (ok ? "webaudio" : (chans ? "media" : "webaudio"));
       if (M.on) M.log("BACKEND DECIDED: " + backend
                       + "  (ctx=" + (ac ? ac.state : "none")
                       + ", channels=" + (chans ? chanState.join("/") : "none") + ")"
@@ -644,6 +648,10 @@
       if (backend === "media") { primeChannels(); return; }   /* maintain, never re-decide */
       if (backend === "webaudio") { open(); return; }         /* maintain, never re-decide */
       open();                                                 /* first activation only */
+      if (FORCE_MEDIA) {                                      /* diagnostic: media, always */
+        if (M.on) M.log("FORCED MEDIA (?forcemedia=1) - Web Audio will NOT be used for SFX");
+        primeChannels(); decide(); return;
+      }
       if (ac && ac.state === "running") { decide(); return; } /* healthy: no media at all */
       primeChannels();
       setTimeout(decide, DECIDE_MS);
