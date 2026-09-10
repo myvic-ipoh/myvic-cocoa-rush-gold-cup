@@ -314,7 +314,7 @@
     FALL_EASY:  0.30, FALL_HARD:  0.60,
     BOMB_EASY:  9,    BOMB_HARD:  26,
     LEVEL_STEP: 50, GOLD_WEIGHT: 5, LEVEL_SPEEDUP: 0.065,
-    MUSIC_VOLUME: 0.22, LOOP_LEAD: 1.8, FADE_PAUSE: 260, FADE_OVER: 700
+    MUSIC_VOLUME: 0.18, LOOP_LEAD: 1.8, FADE_PAUSE: 260, FADE_OVER: 700
   };
 
   /* Catching a bomb is the only way to lose a life; nothing that reaches the
@@ -473,13 +473,8 @@
        pitch, envelope SHAPE and duration are untouched and their relative balance is
        preserved. The same figure is baked into sfx-water/choc/cup/bomb.wav, so the Web
        Audio and media backends are the same loudness. Level tick/GO are NOT affected. */
-    var CATCH_GAIN = 1.4;                 /* +2.923 dB */
+    var CATCH_GAIN = 1.6;                 /* +4.082 dB */
     var backend = null;                   /* null | "webaudio" | "media" */
-    /* TEMP diagnostic split: ?forcemedia=1 skips the state test and commits to the
-       media fallback, so the two-channel path can be heard on a device where
-       state === "running" has proved not to mean audible. */
-    var FORCE_MEDIA = /[?&]forcemedia=1/.test(location.search);
-    var DECIDE_MS = 400;                  /* bounded: always before the first catch */
     /* Six persistent elements, one per unique sound. Each file holds ONLY its own
        sound, so playback is currentTime = 0 then play() - no sprite, no non-zero seek,
        no leading silence, and no stop timer. Different sounds overlap naturally because
@@ -646,28 +641,28 @@
       }
       return started;
     }
-    /* Bounded, one-shot, session-wide. */
+    /* One-shot, session-wide. The six persistent media clips ARE the SFX backend on
+       every platform. Web Audio is deliberately NOT consulted: a real iPhone reported
+       state === "running" with an advancing clock while its Web Audio output was
+       silent, so context state is not a usable audibility test. Web Audio is reached
+       only if the <audio> elements are missing entirely. */
     function decide() {
       if (backend) return;
-      var ok = !!(ac && ac.state === "running");
-      backend = FORCE_MEDIA ? "media" : (ok ? "webaudio" : (clips ? "media" : "webaudio"));
+      var haveClips = false;
+      if (clips) { for (var k in clips) { if (clips[k]) { haveClips = true; break; } } }
+      backend = haveClips ? "media" : "webaudio";
       if (M.on) M.log("BACKEND DECIDED: " + backend
                       + "  (ctx=" + (ac ? ac.state : "none")
                       + ", clips=" + (clips ? JSON.stringify(clipState) : "none") + ")"
                       + "  LATCHED FOR THE SESSION");
     }
     function prime() {
-      session();
-      if (backend === "media") { primeClips(); return; }   /* maintain, never re-decide */
-      if (backend === "webaudio") { open(); return; }         /* maintain, never re-decide */
-      open();                                                 /* first activation only */
-      if (FORCE_MEDIA) {                                      /* diagnostic: media, always */
-        if (M.on) M.log("FORCED MEDIA (?forcemedia=1) - Web Audio will NOT be used for SFX");
-        primeClips(); decide(); return;
-      }
-      if (ac && ac.state === "running") { decide(); return; } /* healthy: no media at all */
-      primeClips();
-      setTimeout(decide, DECIDE_MS);
+      session();                                        /* audioSession "playback" if supported */
+      if (backend === "media") { primeClips(); return; }    /* maintain, never re-decide */
+      if (backend === "webaudio") { open(); return; }       /* maintain, never re-decide */
+      primeClips();                                         /* first activation only */
+      decide();
+      if (backend === "webaudio") open();                   /* only if there were no elements */
     }
     /* Schedule a hair ahead so an envelope is never written into an audio quantum the
        render thread has already produced - which is what silences the first sounds
