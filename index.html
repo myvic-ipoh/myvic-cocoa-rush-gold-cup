@@ -414,6 +414,14 @@
        async and does not guarantee "running"; starting one silent 1-sample buffer in
        the SAME user gesture is what actually opens output. Runs once per context. */
     function prime() {
+      /* iOS puts Web Audio in the "ambient" session, which the Ring/Silent switch
+         mutes - while HTMLAudioElement (the background music) keeps playing. That is
+         why the music was audible on the phone and these SFX were not. Asking for the
+         "playback" session makes the SFX follow the same rules as the music.
+         Feature-detected: a harmless no-op on desktop, Android and older iOS. */
+      if ("audioSession" in navigator) {
+        try { navigator.audioSession.type = "playback"; } catch (e) {}
+      }
       var a = ctx(); if (!a) return;
       if (!primed) {
         try {
